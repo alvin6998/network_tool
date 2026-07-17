@@ -51,7 +51,8 @@ def get_current_config(interface_name):
 
     result = subprocess.run(
         [POWERSHELL_PATH, "-NoProfile", "-Command", ps_script],
-        capture_output=True, text=True, encoding="utf-8"
+        capture_output=True, text=True, encoding="utf-8",
+        creationflags=subprocess.CREATE_NO_WINDOW
     )
 
     try:
