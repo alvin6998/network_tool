@@ -11,13 +11,24 @@ def is_admin():
     except Exception:
         return False
 
+def is_frozen():
+    """判斷目前是打包後的exe,還是直接用python執行的腳本"""
+    return getattr(sys, "frozen", False)
 
 def relaunch_as_admin():
-    """用系統管理員權限重新啟動自己,並帶上原本的參數"""
-    script = os.path.abspath(sys.argv[0])
-    params = " ".join([f'"{script}"'] + [f'"{a}"' for a in sys.argv[1:]])
+    """用系統管理員權限重新啟動自己"""
+    if is_frozen():
+        # 打包後: sys.executable 就是這支 exe 本身
+        target = sys.executable
+        params = " ".join([f'"{a}"' for a in sys.argv[1:]])
+    else:
+        # 開發環境: sys.executable 是 python.exe,要帶上 main.py 路徑
+        target = sys.executable
+        script = os.path.abspath(sys.argv[0])
+        params = " ".join([f'"{script}"'] + [f'"{a}"' for a in sys.argv[1:]])
+
     ctypes.windll.shell32.ShellExecuteW(
-        None, "runas", sys.executable, params, os.path.dirname(script), 1
+        None, "runas", target, params, os.path.dirname(os.path.abspath(sys.argv[0])), 1
     )
 
 
