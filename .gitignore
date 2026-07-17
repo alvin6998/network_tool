@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+
+# PyInstaller 建置產物
+build/
+dist/
+*.spec
+
+# 編輯器
+.vscode/
