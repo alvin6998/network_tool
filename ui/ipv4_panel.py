@@ -197,9 +197,12 @@ class IPv4Panel(QWidget):
         mask = self.mask_input.text().strip()
         gateway = self.gateway_input.text().strip()
 
-        for label, value in [("IP", ip), ("子網路遮罩", mask), ("Gateway", gateway)]:
+        for label, value in [("IP", ip), ("Gateway", gateway)]:
             if not validators.is_valid_ipv4(value):
                 raise ValueError(f"{label} 格式不正確: {value}")
+
+        if not validators.is_valid_subnet_mask(mask):
+            raise ValueError(f"子網路遮罩 格式不正確: {mask}")
 
         netconfig.set_static_ip(interface, ip, mask, gateway)
 

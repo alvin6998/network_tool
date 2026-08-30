@@ -1,14 +1,15 @@
 import psutil
-import subprocess
 import ipaddress
-import json
-import re
-import os
+import pythoncom
+import wmi
 
-POWERSHELL_PATH = os.path.join(
-    os.environ.get("SystemRoot", r"C:\Windows"),
-    "System32", "WindowsPowerShell", "v1.0", "powershell.exe"
-)
+def _get_wmi():
+    """
+    每次都建立新連線,因為這個函式可能在Qt背景執行緒被呼叫,
+    WMI/COM物件不能跨執行緒共用,一定要先 CoInitialize。
+    """
+    pythoncom.CoInitialize()
+    return wmi.WMI()
 
 def list_interfaces():
     """回傳所有網卡名稱與狀態"""
@@ -30,60 +31,59 @@ def list_interfaces():
 
 def get_current_config(interface_name):
     """
-    用 PowerShell 取得目前這張網卡完整的IPv4設定 (不受系統語言影響)
+    用 WMI 取得目前這張網卡完整的IPv4設定 (不受系統語言影響,也不用開PowerShell process)
     回傳: ip, mask, gateway, dns(list), is_dhcp(bool)
     """
-    ps_script = f'''
-    $cfg = Get-NetIPConfiguration -InterfaceAlias "{interface_name}"
-    $ipObj = Get-NetIPAddress -InterfaceAlias "{interface_name}" -AddressFamily IPv4 -ErrorAction SilentlyContinue
-    $dhcpObj = Get-NetIPInterface -InterfaceAlias "{interface_name}" -AddressFamily IPv4 -ErrorAction SilentlyContinue
-    $dns = Get-DnsClientServerAddress -InterfaceAlias "{interface_name}" -AddressFamily IPv4 -ErrorAction SilentlyContinue
-
-    $result = [PSCustomObject]@{{
-        ip       = $ipObj.IPAddress
-        prefix   = $ipObj.PrefixLength
-        gateway  = ($cfg.IPv4DefaultGateway).NextHop
-        dns      = $dns.ServerAddresses
-        is_dhcp  = ($dhcpObj.Dhcp -eq "Enabled")
-    }}
-    $result | ConvertTo-Json -Compress
-    '''
-
-    result = subprocess.run(
-        [POWERSHELL_PATH, "-NoProfile", "-Command", ps_script],
-        capture_output=True, text=True, encoding="utf-8",
-        creationflags=subprocess.CREATE_NO_WINDOW
-    )
+    empty = {"ip": None, "mask": None, "gateway": None, "dns": [], "is_dhcp": False}
 
     try:
-        data = json.loads(result.stdout.strip())
-    except (json.JSONDecodeError, ValueError):
-        return {"ip": None, "mask": None, "gateway": None, "dns": [], "is_dhcp": False}
+        c = _get_wmi()
 
-    # PrefixLength (例如 24) 轉成子網路遮罩 (255.255.255.0)
-    prefix = data.get("prefix")
-    mask = _prefix_to_mask(prefix) if prefix else None
+        # NetConnectionID 就是「網路連線」裡看到的名稱,
+        # 對應到 netsh / PowerShell -InterfaceAlias 用的那個名字
+        adapters = c.Win32_NetworkAdapter(NetConnectionID=interface_name)
+        if not adapters:
+            return empty
+        idx = adapters[0].InterfaceIndex
 
-    dns = data.get("dns")
-    if dns is None:
-        dns_list = []
-    elif isinstance(dns, list):
-        dns_list = dns
-    else:
-        dns_list = [dns]  # 只有一台DNS時,PowerShell會回傳字串而不是陣列
+        cfgs = c.Win32_NetworkAdapterConfiguration(InterfaceIndex=idx)
+        if not cfgs:
+            return empty
+        cfg = cfgs[0]
 
-    return {
-        "ip": data.get("ip"),
-        "mask": mask,
-        "gateway": data.get("gateway"),
-        "dns": dns_list,
-        "is_dhcp": bool(data.get("is_dhcp"))
-    }
+        ip_list = cfg.IPAddress or []
+        mask_list = cfg.IPSubnet or []
+        gateway_list = cfg.DefaultIPGateway or []
+        dns_list = list(cfg.DNSServerSearchOrder or [])
 
-def _prefix_to_mask(prefix_len):
-    """把 CIDR 前綴長度 (例如 24) 轉成 255.255.255.0 這種格式"""
-    network = ipaddress.IPv4Network(f"0.0.0.0/{int(prefix_len)}")
-    return str(network.netmask)
+        # WMI回傳的IPAddress/IPSubnet裡IPv4和IPv6混在一起,取第一個IPv4的
+        ip, mask = None, None
+        for addr, m in zip(ip_list, mask_list):
+            if _is_ipv4(addr):
+                ip, mask = addr, m
+                break
+
+        gateway = None
+        for gw in gateway_list:
+            if _is_ipv4(gw):
+                gateway = gw
+                break
+
+        return {
+            "ip": ip,
+            "mask": mask,
+            "gateway": gateway,
+            "dns": dns_list,
+            "is_dhcp": bool(cfg.DHCPEnabled)
+        }
+    except Exception:
+        return empty
+
+def _is_ipv4(addr):
+    try:
+        return isinstance(ipaddress.ip_address(addr), ipaddress.IPv4Address)
+    except ValueError:
+        return False
 
 def get_gateway_and_dns(interface_name):
     config = get_current_config(interface_name)

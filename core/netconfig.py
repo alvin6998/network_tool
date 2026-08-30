@@ -6,7 +6,8 @@ class NetConfigError(Exception):
 def _run_netsh(args):
     result = subprocess.run(
         ["netsh"] + args,
-        capture_output=True, text=True, encoding="utf-8"
+        capture_output=True, text=True, encoding="utf-8",
+        creationflags=subprocess.CREATE_NO_WINDOW
     )
     if result.returncode != 0:
         raise NetConfigError(result.stderr.strip() or result.stdout.strip())
