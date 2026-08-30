@@ -99,4 +99,6 @@ python main.py
 
 - 目前僅支援 IPv4 設定；IPv6 尚未實作
 - 僅支援 Windows（依賴 `netsh` 與 Windows 主控台工具）
-- 在獲取本機 IP 地址時，程式可能會暫時凍結，原因是會在背景呼叫 PowerShell（啟動較慢，之後考慮改用其他方式取得資訊）
+
+## 已解決
+- 在獲取本機 IP 地址時，程式可能會暫時凍結，原因是會在背景呼叫 PowerShell（目前已改用WMI，速度快很多了）
